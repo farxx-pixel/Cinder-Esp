@@ -20,8 +20,11 @@ jobs:
         run: |
           for f in settings.gradle build.gradle gradle.properties \
                    app/build.gradle app/src/main/AndroidManifest.xml; do
-            if [ -f "$f" ]; then echo "✓ $f"
-            else echo "✗ MISSING: $f" && exit 1
+            if [ -f "$f" ]; then
+              echo "✓ $f"
+            else
+              echo "✗ MISSING: $f"
+              exit 1
             fi
           done
 
@@ -35,7 +38,7 @@ jobs:
         run: |
           wget -q https://services.gradle.org/distributions/gradle-8.4-bin.zip -O gradle.zip
           unzip -q gradle.zip -d /opt/gradle
-          echo "/opt/gradle/gradle-8.4/bin" >> $GITHUB_PATH
+          echo "/opt/gradle/gradle-8.4/bin" >> "$GITHUB_PATH"
 
       - name: Generate Gradle wrapper
         run: |
@@ -53,13 +56,18 @@ jobs:
             ${{ runner.os }}-gradle-
 
       - name: Build Release APK
-        run: ./gradlew assembleRelease --no-daemon --stacktrace
-
-      - name: Generate debug keystore
         run: |
-          mkdir -p ~/.android
+          ./gradlew assembleRelease --no-daemon --stacktrace
+
+      - name: Generate signing keystore
+        run: |
+          KEYSTORE="$RUNNER_TEMP/debug.keystore"
+
+          rm -f "$KEYSTORE"
+
           keytool -genkeypair \
-            -keystore ~/.android/debug.keystore \
+            -v \
+            -keystore "$KEYSTORE" \
             -storepass android \
             -alias androiddebugkey \
             -keypass android \
@@ -68,18 +76,69 @@ jobs:
             -validity 10000 \
             -dname "CN=Android Debug,O=Android,C=US"
 
+          echo "Keystore created:"
+          ls -lh "$KEYSTORE"
+
       - name: Find and sign APK
         run: |
-          SIGNER=$(find $ANDROID_HOME/build-tools -name apksigner | sort -V | tail -1)
+          set -e
+
+          KEYSTORE="$RUNNER_TEMP/debug.keystore"
+
+          if [ ! -f "$KEYSTORE" ]; then
+            echo "ERROR: Keystore not found: $KEYSTORE"
+            exit 1
+          fi
+
+          SIGNER=$(find "$ANDROID_HOME/build-tools" \
+            -type f \
+            -name apksigner \
+            | sort -V \
+            | tail -1)
+
+          if [ -z "$SIGNER" ]; then
+            echo "ERROR: apksigner was not found."
+            exit 1
+          fi
+
           echo "Using signer: $SIGNER"
-          UNSIGNED=$(find app/build/outputs/apk/release -name "*.apk" | grep -v signed | head -1)
-          echo "Signing: $UNSIGNED"
-          $SIGNER sign \
-            --ks ~/.android/debug.keystore \
+
+          UNSIGNED=$(find app/build/outputs/apk/release \
+            -type f \
+            -name "*.apk" \
+            ! -name "*signed*" \
+            | head -1)
+
+          if [ -z "$UNSIGNED" ]; then
+            echo "ERROR: Release APK was not found."
+            find app/build/outputs/apk/release -type f -print
+            exit 1
+          fi
+
+          echo "APK found: $UNSIGNED"
+
+          OUTPUT="app/build/outputs/apk/release/codm-esp-signed.apk"
+
+          "$SIGNER" sign \
+            --ks "$KEYSTORE" \
             --ks-pass pass:android \
             --key-pass pass:android \
-            --out app/build/outputs/apk/release/codm-esp-signed.apk \
-            $UNSIGNED
+            --out "$OUTPUT" \
+            "$UNSIGNED"
+
+          echo "Signed APK:"
+          ls -lh "$OUTPUT"
+
+      - name: Verify APK signature
+        run: |
+          SIGNER=$(find "$ANDROID_HOME/build-tools" \
+            -type f \
+            -name apksigner \
+            | sort -V \
+            | tail -1)
+
+          "$SIGNER" verify --verbose \
+            app/build/outputs/apk/release/codm-esp-signed.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
