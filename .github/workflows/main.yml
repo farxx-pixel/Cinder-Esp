@@ -40,23 +40,31 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-gradle-
 
-      - name: Build Release APK
+            - name: Build Release APK
         run: ./gradlew assembleRelease --no-daemon --stacktrace
+
+      - name: Generate debug keystore
+        run: |
+          mkdir -p "$RUNNER_TEMP"
+          keytool -genkeypair \
+            -keystore "$RUNNER_TEMP/debug.keystore" \
+            -storepass android \
+            -alias androiddebugkey \
+            -keypass android \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
 
       - name: Find and sign APK
         run: |
           SIGNER=$(find $ANDROID_HOME/build-tools -name apksigner | sort -V | tail -1)
-          UNSIGNED=$(find app/build/outputs/apk/release -name "*unsigned*.apk" -o -name "*.apk" | head -1)
+          echo "Using signer: $SIGNER"
+          UNSIGNED=$(find app/build/outputs/apk/release -name "*.apk" | grep -v signed | head -1)
+          echo "Signing: $UNSIGNED"
           $SIGNER sign \
-            --ks ~/.android/debug.keystore \
+            --ks "$RUNNER_TEMP/debug.keystore" \
             --ks-pass pass:android \
             --key-pass pass:android \
             --out app/build/outputs/apk/release/codm-esp-signed.apk \
-            $UNSIGNED
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: CODM-ESP-APK
-          path: app/build/outputs/apk/release/codm-esp-signed.apk
-          retention-days: 30
+            "$UNSIGNED"
