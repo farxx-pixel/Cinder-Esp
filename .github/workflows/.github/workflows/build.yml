@@ -18,16 +18,12 @@ jobs:
 
       - name: Verify required files
         run: |
-          echo "=== Checking required build files ==="
-          for f in settings.gradle build.gradle app/build.gradle app/src/main/AndroidManifest.xml; do
-            if [ -f "$f" ]; then
-              echo "✓ $f"
-            else
-              echo "✗ MISSING: $f"
-              exit 1
+          for f in settings.gradle build.gradle gradle.properties \
+                   app/build.gradle app/src/main/AndroidManifest.xml; do
+            if [ -f "$f" ]; then echo "✓ $f"
+            else echo "✗ MISSING: $f" && exit 1
             fi
           done
-          echo "=== All required files present ==="
 
       - name: Set up JDK 17
         uses: actions/setup-java@v5
@@ -45,7 +41,6 @@ jobs:
         run: |
           gradle wrapper --gradle-version 8.4 --distribution-type bin
           chmod +x gradlew
-          ls -la gradlew
 
       - name: Cache Gradle packages
         uses: actions/cache@v5
@@ -59,6 +54,19 @@ jobs:
 
       - name: Build Release APK
         run: ./gradlew assembleRelease --no-daemon --stacktrace
+
+      - name: Generate debug keystore
+        run: |
+          mkdir -p ~/.android
+          keytool -genkeypair \
+            -keystore ~/.android/debug.keystore \
+            -storepass android \
+            -alias androiddebugkey \
+            -keypass android \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
 
       - name: Find and sign APK
         run: |
